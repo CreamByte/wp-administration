@@ -1,0 +1,77 @@
+#!/bin/bash
+#
+# Multiple installations of WordPress - base script on LAMP with Ubuntu
+#
+
+# Before running the script, download the latest release of WordPress into your home directory.
+# You can use:
+# wget -q -O "http://wordpress.org/latest.tar.gz" latest.tar.gz
+
+file='your_data_file_here'
+while read line ; do
+set -- $line
+baseurl='your_url_here'
+rootpass='your_mysql_root_password_here'
+
+# Set variables to your data columns. 
+# Here: site name, name and password for WP MySQL user account.
+sitename=$1
+username=$2
+userpass=$3
+
+# Create MySQL database
+
+echo "CREATE DATABASE $sitename;" | mysql -u root -p$rootpass
+echo "CREATE USER '$username'@'localhost' IDENTIFIED BY '$userpass';" | mysql -u root -p$rootpass
+echo "GRANT ALL PRIVILEGES ON $sitename.* TO '$username'@'localhost';" | mysql -u root -p$rootpass
+echo "FLUSH PRIVILEGES;" | mysql -u root -p$rootpass
+echo "UPDATE $sitename.wp_options SET option_value='$baseurl/$sitename' WHERE option_name='siteurl' OR option_name='home'" | mysql -u root -p$rootpass
+echo "New MySQL database $sitename has been successfully created"
+
+# Unpack and configure WordPress
+
+tar -xzf /root/latest.tar.gz -C /var/www/html/$sitename
+
+chown www-data: -R /var/www/html/$sitename && cd /var/www/html/$sitename
+cp wp-config-sample.php wp-config.php
+chmod 640 wp-config.php
+mkdir uploads
+touch /var/www/html/$sitename/.htaccess
+chown www-data:www-data /var/www/html/$sitename/.htaccess
+
+sed -i "s/database_name_here/$sitename/;s/username_here/$username/;s/password_here/$userpass/" wp-config.php
+
+# Insert WP salts
+cd /var/www/html/$sitename/
+wget -O wp.keys https://api.wordpress.org/secret-key/1.1/salt/
+sed '45,52d'  wp-config.php > wp-config-stripped.php
+sed '44 r wp.keys' wp-config-stripped.php > wp-config-salt.php
+sed '82 r extras.txt' wp-config-salt.php > wp-config.php
+rm wp.keys
+rm wp-config-sample.php
+rm wp-config-stripped.php
+rm wp-config-salt.php
+cd ~
+
+# Create Apache virtual host
+touch /etc/apache2/sites-available/$sitename
+echo "
+#ServerName $sitename
+#DocumentRoot /var/www/html/$sitename
+#DirectoryIndex index.php
+
+#Options FollowSymLinks
+#AllowOverride All
+
+#ErrorLog ${APACHE_LOG_DIR}/error.log
+#CustomLog ${APACHE_LOG_DIR}/access.log combined
+#" > /etc/apache2/sites-available/$sitename
+
+# Enable the site
+a2ensite $siteurl
+service apache2 restart
+
+
+done < $file
+
+# Finally, go to your new site's address and finish the installation.
